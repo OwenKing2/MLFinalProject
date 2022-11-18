@@ -3,6 +3,8 @@ import itertools
 import warnings
 import nltk
 import pandas as pd
+import sklearn
+import numpy as np
 import torch
 import torch.autograd as autograd
 import torch.nn as nn
@@ -10,6 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 warnings.filterwarnings(action='ignore')
+
 
 def simplified_preprocessing(filename):
     header = ["train_id", "Sentence_1", "Sentence_2", "Output"]
@@ -151,10 +154,8 @@ def all_features(sentence1array, sentence2array):
     return features
 
 
-training_data = simplified_preprocessing("train_with_label.txt")
-X = all_features(training_data["Sentence_1"], training_data["Sentence_2"])
-
-
+#
+#
 def get_device():
     if torch.cuda.is_available():
         device = torch.device('cuda:0')
@@ -168,17 +169,76 @@ def df_to_tensor(df):
     return torch.from_numpy(df.values).float().to(device)
 
 
-df_tensor = df_to_tensor(X)
-print(df_tensor)
+# df_tensor = df_to_tensor(X)
+# print(df_tensor)
+training_data = simplified_preprocessing("train_with_label.txt")
+X = all_features(training_data["Sentence_1"], training_data["Sentence_2"])
+y = training_data["Output"]
 
-class LogisticRegression(torch.nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(LogisticRegression, self).__init__()
-        self.linear = torch.nn.Linear(input_dim, output_dim)
+dev_data = simplified_preprocessing("dev_with_label.txt")
+Xdev = all_features(dev_data["Sentence_1"], dev_data["Sentence_2"])
+ydev = dev_data["Output"]
+
+n_samples, n_features = X.shape
+print(n_samples)
+print(n_features)
+
+scaler = sklearn.preprocessing.StandardScaler()
+X = scaler.fit_transform(X)
+Xdev = scaler.fit_transform(Xdev)
+
+X = torch.from_numpy(X.astype(np.float32))
+Xdev = torch.from_numpy(Xdev.astype(np.float32))
+y = df_to_tensor(y)
+ydev = df_to_tensor(ydev)
+# y = torch.from_numpy(y.astype(np.float32))
+# ydev = torch.from_numpy(ydev.astype(np.float32))
+
+
+y = y.view(y.shape[0], 1)
+ydev = ydev.view(ydev.shape[0], 1)
+
+
+class Logistic_Reg_model(torch.nn.Module):
+    def __init__(self, no_input_features):
+        super(Logistic_Reg_model, self).__init__()
+        self.layer1 = torch.nn.Linear(no_input_features, 20)
+        self.layer2 = torch.nn.Linear(20, 1)
 
     def forward(self, x):
-        outputs = self.linear(x)
-        return outputs
+        y_predicted = self.layer1(x)
+        y_predicted = torch.sigmoid(self.layer2(y_predicted))
+        return y_predicted
+
+
+model = Logistic_Reg_model(n_features)
+criterion = torch.nn.BCELoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+number_of_epochs = 100
+for epoch in range(number_of_epochs):
+    y_prediction = model(X)
+    loss = criterion(y_prediction, y)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+    if (epoch + 1) % 10 == 0:
+        print('epoch:', epoch + 1, ',loss=', loss.item())
+
+with torch.no_grad():
+    y_pred = model(Xdev)
+    y_pred_class = y_pred.round()
+    accuracy = (y_pred_class.eq(ydev).sum()) / float(ydev.shape[0])
+    print(accuracy.item())
+
+# class LogisticRegression(torch.nn.Module):
+#     def __init__(self, input_dim, output_dim):
+#         super(LogisticRegression, self).__init__()
+#         self.linear = torch.nn.Linear(input_dim, output_dim)
+#
+#     def forward(self, x):
+#         outputs = self.linear(x)
+#         return outputs
 
 # class Feedforward(torch.nn.Module):
 #     def __init__(self, input_size, hidden_size):
